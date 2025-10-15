@@ -1,2 +1,8 @@
-Flask==2.3.4
+Flask
+jedi
+pygments
 autopep8
+black
+flake8
+rope
+watchdog
