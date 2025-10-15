@@ -1,0 +1,23 @@
+[project]
+name = "mypythoneditor"
+include = ["**/*"]
+
+[phases.setup]
+commands = [
+  "echo 'Using Python 3.11'"
+]
+
+[phases.install]
+commands = [
+  "curl -sSL https://install.python-poetry.org | python3 -", # optional if using poetry
+  "pip3 install --upgrade pip",
+  "pip3 install -r requirements.txt"
+]
+
+[phases.build]
+commands = []
+
+[phases.start]
+commands = [
+  "python3 app.py"
+]
