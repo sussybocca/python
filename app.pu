@@ -1,0 +1,177 @@
+# -*- coding: utf-8 -*-
+# app.py
+# Single-file Flask demo: sign-in + safe "simulate hacking" stream.
+# This version runs with debug disabled to avoid socket.fromfd WinError on Windows.
+
+from flask import Flask, request, session, redirect, url_for, render_template_string, Response, stream_with_context
+import time
+import json
+import secrets
+
+app = Flask(__name__)
+app.secret_key = secrets.token_hex(16)
+
+# HTML templates (kept ASCII/UTF-8 safe)
+T_LOGIN = """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>MiniSim - Sign In</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f4f6f8; color:#222; }
+    .card { background:white; padding:20px; max-width:360px; margin:60px auto; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.08); }
+    input { width:100%; padding:10px; margin:8px 0; box-sizing:border-box; border-radius:6px; border:1px solid #ddd; }
+    button { width:100%; padding:10px; border-radius:6px; border:none; background:#2563eb; color:white; font-weight:600; }
+    .note { font-size:12px; color:#666; margin-top:12px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>MiniSim - Sign In</h2>
+    {% if error %}<div style="color:#b00020">{{ error }}</div>{% endif %}
+    <form method="POST" action="/">
+      <input name="username" placeholder="username" autofocus required>
+      <input name="password" placeholder="password" type="password" required>
+      <button type="submit">Sign in</button>
+    </form>
+    <div class="note">
+      Demo credentials: <strong>admin / password</strong><br>
+      This is an educational simulation only - it does not perform real attacks.
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+T_DASH = """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>MiniSim - Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#0f1724; color:#e6eef8; }
+    .wrap { max-width:900px; margin:40px auto; padding:20px; }
+    .top { display:flex; justify-content:space-between; align-items:center; }
+    button { padding:10px 14px; border-radius:8px; border:none; cursor:pointer; font-weight:600; }
+    .sim-btn { background:#ff6b6b; color:white; }
+    #logs { background:#071022; padding:16px; border-radius:8px; height:360px; overflow:auto; margin-top:18px; font-family:monospace; font-size:13px; color:#9be7ff; }
+    .small { font-size:13px; color:#aab6d6; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1>MiniSim Dashboard</h1>
+        <div class="small">Signed in as <strong>{{ user }}</strong></div>
+      </div>
+      <div>
+        <form method="POST" action="/logout" style="display:inline">
+          <button type="submit">Sign out</button>
+        </form>
+      </div>
+    </div>
+
+    <p class="small">Click <strong>Simulate Hack</strong> to run a staged, fictional sequence. Nothing on your network or filesystem will be contacted.</p>
+
+    <button class="sim-btn" id="start">Simulate Hack</button>
+    <div id="logs"><em>Logs will appear here...</em></div>
+
+    <script>
+      const logs = document.getElementById('logs');
+      const start = document.getElementById('start');
+
+      function appendLine(line) {
+        const div = document.createElement('div');
+        div.innerHTML = line;
+        logs.appendChild(div);
+        logs.scrollTop = logs.scrollHeight;
+      }
+
+      start.addEventListener('click', function(){
+        if (window.es) { window.es.close(); }
+        logs.innerHTML = '';
+        window.es = new EventSource('/simulate_stream');
+        window.es.onmessage = function(e) {
+          try {
+            const payload = JSON.parse(e.data);
+            appendLine('[' + payload.step + '] ' + payload.msg);
+            if (payload.finish) {
+              appendLine('<div><strong>Simulation complete - this was a safe demo.</strong></div>');
+              window.es.close();
+            }
+          } catch (err) {
+            appendLine(e.data);
+          }
+        };
+        window.es.onerror = function(){
+          appendLine('<div>Connection closed or error.</div>');
+          window.es.close();
+        };
+      });
+    </script>
+  </div>
+</body>
+</html>
+"""
+
+T_FORBIDDEN = """<!doctype html><html><body><h2>Forbidden</h2><p>{{ msg }}</p><a href="/">Back to login</a></body></html>"""
+
+# Demo credentials
+DEMO_USER = "admin"
+DEMO_PASS = "password"
+
+@app.route("/", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        u = request.form.get("username", "")
+        p = request.form.get("password", "")
+        if u == DEMO_USER and p == DEMO_PASS:
+            session['user'] = u
+            return redirect(url_for('dashboard'))
+        else:
+            return render_template_string(T_LOGIN, error="Invalid credentials")
+    if 'user' in session:
+        return redirect(url_for('dashboard'))
+    return render_template_string(T_LOGIN, error=None)
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
+@app.route("/dashboard")
+def dashboard():
+    if 'user' not in session:
+        return render_template_string(T_FORBIDDEN, msg="Please sign in first."), 403
+    return render_template_string(T_DASH, user=session['user'])
+
+def simulation_generator():
+    # This generator only yields staged, fictional messages. No real network or file actions.
+    steps = [
+        ("INIT", "Initializing simulation environment..."),
+        ("DISCOVERY", "Performing simulated network discovery (fake results)..."),
+        ("PORT_SCAN", "Scanning common ports (simulated)..."),
+        ("VULN_CHECK", "Checking for known vuln signatures (simulated)..."),
+        ("EXPLOIT", "Crafting fictional exploit payload (no real code executed)..."),
+        ("SHELL", "Dropping into imaginary shell (simulated)..."),
+        ("EXFIL", "Simulating data exfiltration to sandbox (no real transfer)..."),
+        ("CLEANUP", "Cleaning up traces in the simulation (simulated)...")
+    ]
+    for i, (step, msg) in enumerate(steps, start=1):
+        payload = {"step": step, "msg": msg, "index": i}
+        yield "data: " + json.dumps(payload) + "\n\n"
+        time.sleep(0.9)
+    final = {"step": "DONE", "msg": "All simulated steps complete. NOTE: This was a safe demo only.", "finish": True}
+    yield "data: " + json.dumps(final) + "\n\n"
+
+@app.route("/simulate_stream")
+def simulate_stream():
+    if 'user' not in session:
+        return render_template_string(T_FORBIDDEN, msg="Please sign in to run the simulation."), 403
+    return Response(stream_with_context(simulation_generator()), mimetype='text/event-stream')
+
+if __name__ == "__main__":
+    # Run with debug disabled to avoid Windows socket.fromfd issue.
+    app.run(host="127.0.0.1", port=5001, debug=False)
+
